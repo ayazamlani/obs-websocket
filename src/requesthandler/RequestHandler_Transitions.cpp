@@ -331,3 +331,62 @@ RequestResult RequestHandler::SetTBarPosition(const Request &request)
 
 	return RequestResult::Success();
 }
+
+/**
+ * Creates a new scene transition.
+ *
+ * @requestField transitionName       | String | Name of the new transition
+ * @requestField ?transitionKind      | String | Kind of the new transition | `obs_stinger_transition`
+ * @requestField ?transitionSettings | Object | Settings for the new transition | Default settings
+ *
+ * @requestType CreateTransition
+ * @complexity 3
+ * @rpcVersion -1
+ * @initialVersion 5.0.0
+ * @api requests
+ * @category transitions
+ */
+RequestResult RequestHandler::CreateTransition(const Request &request)
+{
+	RequestStatus::RequestStatus statusCode;
+	std::string comment;
+	if (!request.ValidateString("transitionName", statusCode, comment))
+		return RequestResult::Error(statusCode, comment);
+
+	std::string transitionName = request.RequestData["transitionName"];
+
+	OBSSourceAutoRelease existingTransition = Utils::Obs::SearchHelper::GetSceneTransitionByName(transitionName);
+	if (existingTransition)
+		return RequestResult::Error(RequestStatus::ResourceAlreadyExists,
+					    "A transition already exists by that name.");
+
+	std::string transitionKind = "obs_stinger_transition";
+	if (request.Contains("transitionKind")) {
+		if (!request.ValidateOptionalString("transitionKind", statusCode, comment))
+			return RequestResult::Error(statusCode, comment);
+
+		transitionKind = request.RequestData["transitionKind"];
+
+		auto kinds = Utils::Obs::ArrayHelper::GetTransitionKindList();
+		if (std::find(kinds.begin(), kinds.end(), transitionKind) == kinds.end())
+			return RequestResult::Error(RequestStatus::InvalidRequestField,
+						    "The specified transition kind is not valid.");
+	}
+
+	OBSDataAutoRelease transitionSettings = nullptr;
+	if (request.Contains("transitionSettings")) {
+		if (!request.ValidateOptionalObject("transitionSettings", statusCode, comment, true))
+			return RequestResult::Error(statusCode, comment);
+
+		transitionSettings = Utils::Json::JsonToObsData(request.RequestData["transitionSettings"]);
+	}
+
+	OBSSourceAutoRelease transition =
+		obs_source_create(transitionKind.c_str(), transitionName.c_str(), transitionSettings, nullptr);
+	if (!transition)
+		return RequestResult::Error(RequestStatus::ResourceCreationFailed, "Failed to create transition.");
+
+	obs_frontend_add_transition(transition);
+
+	return RequestResult::Success();
+}
